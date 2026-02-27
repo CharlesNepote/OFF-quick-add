@@ -6,11 +6,11 @@ import time
 from PIL import Image
 
 # Configuration
-USER_AGENT = "OFF-Quick-Add/1.0 (Contact: your@email.com)"
+USER_AGENT = "OFF-Quick-Add/2.2 (Contact: your@email.com)"
 api = openfoodfacts.API(user_agent=USER_AGENT)
 
 st.set_page_config(page_title="OFF Quick Context", page_icon="📸")
-st.title("OFF Quick Context Add 🚀")
+st.title("OFF Quick Add 🚀")
 
 # --- CATEGORY SEARCH LOGIC ---
 def search_off_categories(query):
