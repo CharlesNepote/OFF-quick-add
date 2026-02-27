@@ -1,86 +1,125 @@
 import streamlit as st
 import openfoodfacts
 import zxingcpp
+import requests
+import time
 from PIL import Image
 
-# API Setup
-# Use a clear User-Agent as per OFF policy
+# Configuration
 USER_AGENT = "OFF-Quick-Add/1.0 (Contact: your@email.com)"
 api = openfoodfacts.API(user_agent=USER_AGENT)
 
-st.set_page_config(page_title="OFF Quick Add", page_icon="📸")
+st.set_page_config(page_title="OFF Quick Context", page_icon="📸")
 st.title("OFF Quick Context Add 🚀")
 
-# 1. Sidebar Configuration
+# --- CATEGORY SEARCH LOGIC ---
+def search_off_categories(query):
+    """Fetch official categories from OFF Suggest API."""
+    if len(query) < 4:
+        return []
+    
+    # suggest.pl is the fastest endpoint for taxonomy autocompletion
+    url = f"https://world.openfoodfacts.org/cgi/suggest.pl?tagtype=categories&term={query}"
+    try:
+        response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=5)
+        if response.status_code == 200:
+            return [item['text'] for item in response.json()]
+    except:
+        return []
+    return []
+
+# --- SIDEBAR (SETTINGS) ---
 with st.sidebar:
-    st.header("Settings")
+    st.header("Global Settings")
     target_country = st.text_input("Target Country", "France")
-    target_category = st.text_input("Target Category (Optional)", "")
+    
+    st.divider()
+    st.subheader("Category Selection")
+    # Search input field
+    cat_input = st.text_input("Search category (min. 4 chars)", key="cat_search_input")
+    
+    # Debounce Logic (2 seconds)
+    current_time = time.time()
+    last_call = st.session_state.get('last_api_call', 0)
+    cat_options = st.session_state.get('last_options', [])
+
+    if len(cat_input) >= 4:
+        # Check if 2 seconds have passed since the last API call
+        if current_time - last_call > 2.0:
+            with st.spinner("Searching categories..."):
+                cat_options = search_off_categories(cat_input)
+                st.session_state['last_api_call'] = current_time
+                st.session_state['last_options'] = cat_options
+    
+    selected_category = st.selectbox(
+        "Select official category", 
+        options=cat_options,
+        help="Taxonomy results from Open Food Facts"
+    )
+    
     st.divider()
     username = st.text_input("OFF Username")
     password = st.text_input("OFF Password", type="password")
 
-# 2. Scanning Interface
-st.subheader("Scan Product")
-# st.camera_input is the most reliable way on mobile browsers
-img_file = st.camera_input("Take a clear photo of the barcode")
+# --- MAIN SCANNING AREA ---
+st.subheader("1. Capture Barcode")
+# Note: Streamlit handles the 'rear camera' preference automatically on mobile 
+# by prioritizing the 'environment' camera for this component.
+img_file = st.camera_input("Snap the product's barcode")
 
-# 3. Processing Logic
 if img_file:
-    # Decoding the barcode from the image
+    # Barcode Decoding
     img = Image.open(img_file)
     results = zxingcpp.read_barcodes(img)
     
     if not results:
-        st.error("❌ No barcode detected. Please ensure the barcode is flat, well-lit, and centered.")
+        st.error("❌ No barcode detected. Ensure the barcode is flat and well-lit.")
     else:
         barcode = results[0].text
         st.success(f"✅ Barcode detected: {barcode}")
         
+        # --- UPDATE LOGIC ---
         if not (username and password):
             st.warning("⚠️ Please provide your OFF credentials in the sidebar.")
         else:
             try:
-                # Authenticate and fetch product
-                api.authenticate(username, password)
-                product = api.product.get(barcode)
-                
-                if product:
-                    product_name = product.get('product_name', 'Unknown Product')
-                    st.write(f"Product: **{product_name}**")
+                with st.spinner("Updating Open Food Facts..."):
+                    api.authenticate(username, password)
+                    product = api.product.get(barcode)
                     
-                    # Logic: Check if update is actually needed
-                    current_countries = [c.strip().lower() for c in product.get('countries', '').split(',')]
-                    
-                    update_payload = {"code": barcode}
-                    needs_update = False
-                    
-                    # Check country
-                    if target_country.lower() not in current_countries:
-                        update_payload["countries"] = target_country
-                        needs_update = True
-                        st.info(f"Adding country: {target_country}")
+                    if product:
+                        p_name = product.get('product_name', 'Unknown')
+                        st.info(f"Product: **{p_name}**")
                         
-                    # Check category
-                    if target_category:
-                        # Note: we use 'add_categories' to append rather than replace
-                        update_payload["add_categories"] = target_category
-                        needs_update = True
-                        st.info(f"Adding category: {target_category}")
-                    
-                    if needs_update:
-                        response = api.product.update(update_payload)
-                        if response.get("status") == 1:
-                            st.balloons()
-                            st.success("Successfully updated on Open Food Facts!")
+                        countries_str = product.get('countries', '') or ''
+                        existing_countries = [c.strip().lower() for c in countries_str.split(',')]
+                        
+                        update_payload = {"code": barcode}
+                        needs_push = False
+                        
+                        # Add country if missing
+                        if target_country.lower() not in existing_countries:
+                            update_payload["countries"] = target_country
+                            needs_push = True
+                            
+                        # Add category if selected
+                        if selected_category:
+                            update_payload["add_categories"] = selected_category
+                            needs_push = True
+                        
+                        if needs_push:
+                            res = api.product.update(update_payload)
+                            if res.get("status") == 1:
+                                st.balloons()
+                                st.success(f"Successfully updated {barcode}!")
+                            else:
+                                st.error(f"API Error: {res.get('status_verbose')}")
                         else:
-                            st.error(f"API Error: {response.get('status_verbose')}")
+                            st.info("ℹ️ Product already contains this information.")
                     else:
-                        st.info("ℹ️ Product already contains this information.")
-                else:
-                    st.error("❌ Product not found in Open Food Facts database.")
+                        st.error("❌ Product not found in database.")
             except Exception as e:
-                st.error(f"An unexpected error occurred: {e}")
+                st.error(f"Error: {e}")
 
 st.divider()
-st.caption("Powered by official Open Food Facts Python SDK.")
+st.caption("v2.2 | Optimized for Mobile Rear Camera | API Debounce")

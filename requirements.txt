@@ -2,5 +2,6 @@ streamlit
 openfoodfacts
 zxing-cpp
 Pillow
+requests
 # streamlit-webrtc # Too slow
 # streamlit-barcode-scanner @ git+https://github.com/FloWide/streamlit-barcode-scanner.git
