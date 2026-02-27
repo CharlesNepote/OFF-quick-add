@@ -2,12 +2,10 @@ import streamlit as st
 import openfoodfacts
 import zxingcpp
 import requests
-import time
 from PIL import Image
 
 # Configuration
 USER_AGENT = "OFF-Quick-Add/2.2 (Contact: your@email.com)"
-api = openfoodfacts.API(user_agent=USER_AGENT)
 
 st.set_page_config(page_title="OFF Quick Context", page_icon="📸")
 st.title("OFF Quick Add 🚀")
@@ -81,7 +79,12 @@ if img_file:
         else:
             try:
                 with st.spinner("Updating Open Food Facts..."):
-                    api.authenticate(username, password)
+                    # Credentials are passed at API instantiation, not via authenticate()
+                    api = openfoodfacts.API(
+                        user_agent=USER_AGENT,
+                        username=username,
+                        password=password
+                    )
                     product = api.product.get(barcode)
                     
                     if product:
@@ -119,4 +122,4 @@ if img_file:
                 st.error(f"Error: {e}")
 
 st.divider()
-st.caption("v2.2 | Optimized for Mobile Rear Camera | API Debounce")
+st.caption("v2.2 | Optimized for Mobile Rear Camera")
