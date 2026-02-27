@@ -1,3 +1,3 @@
 streamlit
 openfoodfacts
-zxingcpp
+streamlit-barcode-scanner @ git+https://github.com/FloWide/streamlit-barcode-scanner.git
