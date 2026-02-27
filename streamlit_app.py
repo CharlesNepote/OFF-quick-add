@@ -1,64 +1,86 @@
 import streamlit as st
 import openfoodfacts
 import zxingcpp
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+from PIL import Image
 
 # API Setup
-USER_AGENT = "OFF-Quick-Scan/1.0"
+# Use a clear User-Agent as per OFF policy
+USER_AGENT = "OFF-Quick-Add/1.0 (Contact: your@email.com)"
 api = openfoodfacts.API(user_agent=USER_AGENT)
 
-st.title("OFF Continuous Scanner ⚡")
+st.set_page_config(page_title="OFF Quick Add", page_icon="📸")
+st.title("OFF Quick Context Add 🚀")
 
-# 1. Sidebar Config
+# 1. Sidebar Configuration
 with st.sidebar:
     st.header("Settings")
-    target_country = st.text_input("Country", "France")
-    target_category = st.text_input("Category", "")
+    target_country = st.text_input("Target Country", "France")
+    target_category = st.text_input("Target Category (Optional)", "")
     st.divider()
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    username = st.text_input("OFF Username")
+    password = st.text_input("OFF Password", type="password")
 
-if 'last_scanned' not in st.session_state:
-    st.session_state.last_scanned = None
+# 2. Scanning Interface
+st.subheader("Scan Product")
+# st.camera_input is the most reliable way on mobile browsers
+img_file = st.camera_input("Take a clear photo of the barcode")
 
-# 2. Continuous Scan Logic
-class BarcodeProcessor(VideoTransformerBase):
-    def transform(self, frame):
-        img = frame.to_ndarray(format="bgr224") # Small format for speed
-        results = zxingcpp.read_barcodes(img)
-        
-        if results:
-            barcode = results[0].text
-            return barcode
-        return None
-
-# Webrtc streamer handles the continuous video feed
-ctx = webrtc_streamer(
-    key="barcode-scanner",
-    video_transformer_factory=BarcodeProcessor,
-    rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-    media_stream_constraints={"video": {"facingMode": "environment"}, "audio": False},
-)
-
-# 3. Handle Detection
-# This part runs when a barcode is returned by the video thread
-if ctx.video_transformer and ctx.video_transformer.last_result:
-    barcode = ctx.video_transformer.last_result
+# 3. Processing Logic
+if img_file:
+    # Decoding the barcode from the image
+    img = Image.open(img_file)
+    results = zxingcpp.read_barcodes(img)
     
-    if barcode != st.session_state.last_scanned:
-        st.session_state.last_scanned = barcode
-        st.audio("https://www.soundjay.com/buttons/beep-07.mp3") # Audio feedback
+    if not results:
+        st.error("❌ No barcode detected. Please ensure the barcode is flat, well-lit, and centered.")
+    else:
+        barcode = results[0].text
+        st.success(f"✅ Barcode detected: {barcode}")
         
-        if username and password:
+        if not (username and password):
+            st.warning("⚠️ Please provide your OFF credentials in the sidebar.")
+        else:
             try:
+                # Authenticate and fetch product
                 api.authenticate(username, password)
-                # Quick update logic
-                update_payload = {
-                    "code": barcode,
-                    "countries": target_country,
-                    "add_categories": target_category
-                }
-                api.product.update(update_payload)
-                st.success(f"Sent: {barcode}")
+                product = api.product.get(barcode)
+                
+                if product:
+                    product_name = product.get('product_name', 'Unknown Product')
+                    st.write(f"Product: **{product_name}**")
+                    
+                    # Logic: Check if update is actually needed
+                    current_countries = [c.strip().lower() for c in product.get('countries', '').split(',')]
+                    
+                    update_payload = {"code": barcode}
+                    needs_update = False
+                    
+                    # Check country
+                    if target_country.lower() not in current_countries:
+                        update_payload["countries"] = target_country
+                        needs_update = True
+                        st.info(f"Adding country: {target_country}")
+                        
+                    # Check category
+                    if target_category:
+                        # Note: we use 'add_categories' to append rather than replace
+                        update_payload["add_categories"] = target_category
+                        needs_update = True
+                        st.info(f"Adding category: {target_category}")
+                    
+                    if needs_update:
+                        response = api.product.update(update_payload)
+                        if response.get("status") == 1:
+                            st.balloons()
+                            st.success("Successfully updated on Open Food Facts!")
+                        else:
+                            st.error(f"API Error: {response.get('status_verbose')}")
+                    else:
+                        st.info("ℹ️ Product already contains this information.")
+                else:
+                    st.error("❌ Product not found in Open Food Facts database.")
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"An unexpected error occurred: {e}")
+
+st.divider()
+st.caption("Powered by official Open Food Facts Python SDK.")
