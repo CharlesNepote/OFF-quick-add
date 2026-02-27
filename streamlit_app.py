@@ -23,7 +23,7 @@ def search_off_categories(query):
     try:
         response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=5)
         if response.status_code == 200:
-            return [item['text'] for item in response.json()]
+            return response.json()  # API returns a plain list of strings
     except:
         return []
     return []
@@ -38,18 +38,15 @@ with st.sidebar:
     # Search input field
     cat_input = st.text_input("Search category (min. 4 chars)", key="cat_search_input")
     
-    # Debounce Logic (2 seconds)
-    current_time = time.time()
-    last_call = st.session_state.get('last_api_call', 0)
+    # Only re-fetch when the query actually changes
+    last_query = st.session_state.get('last_query', '')
     cat_options = st.session_state.get('last_options', [])
 
-    if len(cat_input) >= 4:
-        # Check if 2 seconds have passed since the last API call
-        if current_time - last_call > 2.0:
-            with st.spinner("Searching categories..."):
-                cat_options = search_off_categories(cat_input)
-                st.session_state['last_api_call'] = current_time
-                st.session_state['last_options'] = cat_options
+    if len(cat_input) >= 4 and cat_input != last_query:
+        with st.spinner("Searching categories..."):
+            cat_options = search_off_categories(cat_input)
+            st.session_state['last_query'] = cat_input
+            st.session_state['last_options'] = cat_options
     
     selected_category = st.selectbox(
         "Select official category", 
