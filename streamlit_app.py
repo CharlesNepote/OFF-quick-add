@@ -109,11 +109,12 @@ if img_file:
                         
                         if needs_push:
                             res = api.product.update(update_payload)
-                            if res.get("status") == 1:
+                            res_json = res.json()
+                            if res_json.get("status") == 1:
                                 st.balloons()
                                 st.success(f"Successfully updated {barcode}!")
                             else:
-                                st.error(f"API Error: {res.get('status_verbose')}")
+                                st.error(f"API Error: {res_json.get('status_verbose')}")
                         else:
                             st.info("ℹ️ Product already contains this information.")
                     else:
