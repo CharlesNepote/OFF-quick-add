@@ -1,78 +1,86 @@
 import streamlit as st
 import openfoodfacts
-from streamlit_barcode_scanner import st_barcode_scanner
+import zxingcpp
+from PIL import Image
 
-# OFF API Setup
-# Please replace with your actual email to follow OFF's terms of use
-USER_AGENT = "QuickOFFContext/1.0 (Contact: your@email.com)"
+# API Setup
+# Use a clear User-Agent as per OFF policy
+USER_AGENT = "OFF-Quick-Add/1.0 (Contact: your@email.com)"
 api = openfoodfacts.API(user_agent=USER_AGENT)
 
-st.set_page_config(page_title="OFF Quick Context", page_icon="🌍")
-st.title("OFF Quick Context 🚀")
+st.set_page_config(page_title="OFF Quick Add", page_icon="📸")
+st.title("OFF Quick Context Add 🚀")
 
-# 1. Persistent settings
-if 'country' not in st.session_state:
-    st.session_state.country = "France"
-if 'category' not in st.session_state:
-    st.session_state.category = ""
-
+# 1. Sidebar Configuration
 with st.sidebar:
     st.header("Settings")
-    st.session_state.country = st.text_input("My Current Country", st.session_state.country)
-    st.session_state.category = st.text_input("Product Category", st.session_state.category)
+    target_country = st.text_input("Target Country", "France")
+    target_category = st.text_input("Target Category (Optional)", "")
+    st.divider()
     username = st.text_input("OFF Username")
     password = st.text_input("OFF Password", type="password")
 
-# 2. Live Scanner
-st.subheader("Scan Barcode")
-# The scanner returns the barcode string once detected
-barcode = st_barcode_scanner()
+# 2. Scanning Interface
+st.subheader("Scan Product")
+# st.camera_input is the most reliable way on mobile browsers
+img_file = st.camera_input("Take a clear photo of the barcode")
 
-if barcode:
-    st.success(f"Barcode: {barcode}")
+# 3. Processing Logic
+if img_file:
+    # Decoding the barcode from the image
+    img = Image.open(img_file)
+    results = zxingcpp.read_barcodes(img)
     
-    if not (username and password):
-        st.warning("⚠️ Credentials missing in sidebar.")
+    if not results:
+        st.error("❌ No barcode detected. Please ensure the barcode is flat, well-lit, and centered.")
     else:
-        try:
-            # Check existing product data
-            product = api.product.get(barcode)
-            
-            if product:
-                name = product.get('product_name', 'Unknown Product')
-                st.info(f"Checking: **{name}**")
+        barcode = results[0].text
+        st.success(f"✅ Barcode detected: {barcode}")
+        
+        if not (username and password):
+            st.warning("⚠️ Please provide your OFF credentials in the sidebar.")
+        else:
+            try:
+                # Authenticate and fetch product
+                api.authenticate(username, password)
+                product = api.product.get(barcode)
                 
-                # Compare current data with targets
-                existing_countries = [c.strip().lower() for c in product.get('countries', '').split(',')]
-                target_country = st.session_state.country.strip().lower()
-                
-                update_data = {"code": barcode}
-                needs_update = False
-                
-                # Logic: Update only if missing
-                if target_country not in existing_countries:
-                    update_data["countries"] = st.session_state.country
-                    needs_update = True
-                
-                if st.session_state.category:
-                    # add_categories avoids overwriting existing ones
-                    update_data["add_categories"] = st.session_state.category
-                    needs_update = True
-                
-                if needs_update:
-                    api.authenticate(username, password)
-                    result = api.product.update(update_data)
-                    if result.get("status") == 1:
-                        st.balloons()
-                        st.success("✅ Successfully updated!")
+                if product:
+                    product_name = product.get('product_name', 'Unknown Product')
+                    st.write(f"Product: **{product_name}**")
+                    
+                    # Logic: Check if update is actually needed
+                    current_countries = [c.strip().lower() for c in product.get('countries', '').split(',')]
+                    
+                    update_payload = {"code": barcode}
+                    needs_update = False
+                    
+                    # Check country
+                    if target_country.lower() not in current_countries:
+                        update_payload["countries"] = target_country
+                        needs_update = True
+                        st.info(f"Adding country: {target_country}")
+                        
+                    # Check category
+                    if target_category:
+                        # Note: we use 'add_categories' to append rather than replace
+                        update_payload["add_categories"] = target_category
+                        needs_update = True
+                        st.info(f"Adding category: {target_category}")
+                    
+                    if needs_update:
+                        response = api.product.update(update_payload)
+                        if response.get("status") == 1:
+                            st.balloons()
+                            st.success("Successfully updated on Open Food Facts!")
+                        else:
+                            st.error(f"API Error: {response.get('status_verbose')}")
                     else:
-                        st.error(f"Error: {result.get('status_verbose')}")
+                        st.info("ℹ️ Product already contains this information.")
                 else:
-                    st.info("ℹ️ Product already has this country/category.")
-            else:
-                st.error("❌ Product not found in database.")
-        except Exception as e:
-            st.error(f"API Error: {e}")
+                    st.error("❌ Product not found in Open Food Facts database.")
+            except Exception as e:
+                st.error(f"An unexpected error occurred: {e}")
 
 st.divider()
-st.caption("Scan a product to automatically add your current country and category.")
+st.caption("Powered by official Open Food Facts Python SDK.")
